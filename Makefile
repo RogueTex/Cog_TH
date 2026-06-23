@@ -38,12 +38,12 @@ down: ## Stop and remove containers
 logs: ## Tail container logs
 	docker compose logs -f
 
-demo: ## Adopt the existing issue #2 / PR #4 / Devin session, then print the report
+demo: ## Adopt the existing issue #2 / PR #4 / Devin session, then print the status summary
 	curl -s -X POST http://localhost:8000/adopt \
 		-H 'Content-Type: application/json' \
-		-d '{"issue_number": 2, "devin_session_url": "https://app.devin.ai/sessions/edd1bd6ac10b4e899ba2a886a1b5f744", "pull_request_url": "https://github.com/RogueTex/superset/pull/4", "issue_title": "Remove dockerize init image"}'
-	@echo "\n--- report ---"
-	curl -s http://localhost:8000/report
+		-d '{"issue_number": 2, "devin_session_url": "https://app.devin.ai/sessions/edd1bd6ac10b4e899ba2a886a1b5f744", "pull_request_url": "https://github.com/RogueTex/superset/pull/4", "issue_title": "Remove dockerize init image from Helm startup waits"}'
+	@echo "\n--- status summary ---"
+	curl -s http://localhost:8000/summary
 
 clean: ## Remove local data + caches
 	rm -rf data .pytest_cache .ruff_cache

@@ -1,7 +1,7 @@
 [project]
-name = "cognition-devin-autopilot"
+name = "devin-issue-runner"
 version = "0.1.0"
-description = "Event-driven automation: GitHub issue -> Devin remediation session -> leadership report."
+description = "Workflow service: GitHub issue -> Devin remediation session -> status summary."
 requires-python = ">=3.11"
 
 [tool.ruff]
