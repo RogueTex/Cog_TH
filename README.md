@@ -159,8 +159,8 @@ make lint     # ruff
 | `GET` | `/runs` | List all runs |
 | `GET` | `/runs/{run_id}` | Fetch one run |
 | `POST` | `/runs/{run_id}/poll` | Refresh Devin session status + PR metadata |
-| `GET` | `/summary` | Markdown status summary (alias: `/report`) |
-| `GET` | `/summary.json` | JSON-wrapped status summary (alias: `/report.json`) |
+| `GET` | `/summary` | Markdown status summary |
+| `GET` | `/summary.json` | JSON-wrapped status summary |
 | `GET` | `/` , `/health` | Service info / liveness |
 
 ---

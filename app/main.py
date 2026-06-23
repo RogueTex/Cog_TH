@@ -6,7 +6,7 @@ Endpoints:
     GET  /runs              list all runs
     GET  /runs/{run_id}     fetch one run
     POST /runs/{run_id}/poll  refresh status from Devin + GitHub
-    GET  /summary           Markdown status summary (alias: /report)
+    GET  /summary           Markdown status summary
 """
 from __future__ import annotations
 
@@ -115,7 +115,7 @@ def root() -> dict[str, Any]:
         "github_configured": settings.github_configured,
         "endpoints": [
             "/simulate", "/adopt", "/runs", "/runs/{id}",
-            "/runs/{id}/poll", "/summary", "/report",
+            "/runs/{id}/poll", "/summary",
         ],
     }
 
