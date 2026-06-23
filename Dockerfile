@@ -13,7 +13,7 @@ COPY app ./app
 
 # Persisted SQLite location (mount a volume here in compose).
 RUN mkdir -p /app/data
-ENV DB_PATH=/app/data/autopilot.db
+ENV DB_PATH=/app/data/devin_issue_runner.db
 
 EXPOSE 8000
 

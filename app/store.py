@@ -2,7 +2,7 @@
 
 A "run" links a GitHub issue to the Devin session (and PR) that remediates it.
 The store is intentionally small and synchronous; SQLite is plenty for a
-single-instance demo automation.
+single-instance workflow service.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from typing import Any
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id                TEXT PRIMARY KEY,
-    mode              TEXT NOT NULL,            -- 'real' | 'adopt'
+    mode              TEXT NOT NULL,            -- 'real' | 'import'
     repo              TEXT NOT NULL,
     issue_number      INTEGER NOT NULL,
     issue_url         TEXT,
@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS runs (
     devin_session_url TEXT,
     pull_request_url  TEXT,
     pr_state          TEXT,
-    status            TEXT NOT NULL,            -- new|running|exit|error|adopted|...
+    issue_comment_id  TEXT,
+    issue_comment_url TEXT,
+    issue_comment_posted_at TEXT,
+    status            TEXT NOT NULL,            -- new|running|exit|error|imported|...
     structured_output TEXT,                     -- JSON blob from Devin, if any
     detail            TEXT,                     -- free-form notes / last poll detail
     created_at        TEXT NOT NULL,
@@ -41,6 +44,9 @@ _UPDATABLE = {
     "devin_session_url",
     "pull_request_url",
     "pr_state",
+    "issue_comment_id",
+    "issue_comment_url",
+    "issue_comment_posted_at",
     "status",
     "structured_output",
     "detail",
@@ -64,6 +70,7 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.executescript(_SCHEMA)
+        self._ensure_columns()
         self._conn.commit()
 
     def close(self) -> None:
@@ -94,6 +101,75 @@ class Store:
         row = cur.fetchone()
         return self._row_to_dict(row) if row else None
 
+    def reserve_real_run(self, repo: str, issue_number: int) -> tuple[dict[str, Any], bool]:
+        """Reserve a real run before external API calls.
+
+        Returns (run, created). The BEGIN IMMEDIATE transaction prevents two
+        concurrent triggers in this process from both passing the idempotency
+        check before a Devin session is created.
+        """
+        now = _now()
+        run_id = uuid.uuid4().hex
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            cur = self._conn.execute(
+                "SELECT * FROM runs WHERE repo = ? AND issue_number = ? AND mode = 'real' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (repo, issue_number),
+            )
+            row = cur.fetchone()
+            if row:
+                self._conn.commit()
+                return self._row_to_dict(row), False
+
+            self._conn.execute(
+                """
+                INSERT INTO runs (
+                    id, mode, repo, issue_number, status, detail, created_at, updated_at
+                ) VALUES (?,?,?,?,?,?,?,?)
+                """,
+                (
+                    run_id,
+                    "real",
+                    repo,
+                    issue_number,
+                    "queued",
+                    "Reserved before creating the Devin session.",
+                    now,
+                    now,
+                ),
+            )
+            self._conn.commit()
+            run = self.get_run(run_id)
+            assert run is not None
+            return run, True
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def find_issue_run(
+        self,
+        repo: str,
+        issue_number: int,
+        *,
+        mode: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the newest run for an issue, optionally scoped to a mode."""
+        if mode:
+            cur = self._conn.execute(
+                "SELECT * FROM runs WHERE repo = ? AND issue_number = ? AND mode = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (repo, issue_number, mode),
+            )
+        else:
+            cur = self._conn.execute(
+                "SELECT * FROM runs WHERE repo = ? AND issue_number = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (repo, issue_number),
+            )
+        row = cur.fetchone()
+        return self._row_to_dict(row) if row else None
+
     # --- mutations -----------------------------------------------------
 
     def create_run(
@@ -109,6 +185,9 @@ class Store:
         devin_session_url: str | None = None,
         pull_request_url: str | None = None,
         pr_state: str | None = None,
+        issue_comment_url: str | None = None,
+        issue_comment_id: str | None = None,
+        issue_comment_posted_at: str | None = None,
         structured_output: dict[str, Any] | None = None,
         detail: str | None = None,
     ) -> dict[str, Any]:
@@ -119,8 +198,9 @@ class Store:
             INSERT INTO runs (
                 id, mode, repo, issue_number, issue_url, issue_title,
                 devin_session_id, devin_session_url, pull_request_url, pr_state,
+                issue_comment_id, issue_comment_url, issue_comment_posted_at,
                 status, structured_output, detail, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 run_id,
@@ -133,6 +213,9 @@ class Store:
                 devin_session_url,
                 pull_request_url,
                 pr_state,
+                issue_comment_id,
+                issue_comment_url,
+                issue_comment_posted_at,
                 status,
                 json.dumps(structured_output) if structured_output is not None else None,
                 detail,
@@ -179,3 +262,20 @@ class Store:
             except (TypeError, json.JSONDecodeError):
                 pass
         return data
+
+    def _ensure_columns(self) -> None:
+        """Add columns introduced after the initial schema."""
+        existing = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        migrations = {
+            "issue_comment_url": "ALTER TABLE runs ADD COLUMN issue_comment_url TEXT",
+            "issue_comment_id": "ALTER TABLE runs ADD COLUMN issue_comment_id TEXT",
+            "issue_comment_posted_at": (
+                "ALTER TABLE runs ADD COLUMN issue_comment_posted_at TEXT"
+            ),
+        }
+        for column, statement in migrations.items():
+            if column not in existing:
+                self._conn.execute(statement)

@@ -1,0 +1,111 @@
+# Copy this file to .github/workflows/devin-issue-runner.yml in the target repo.
+name: Devin Issue Runner
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to route to Devin
+        required: true
+      repo:
+        description: Target repo in owner/name form
+        required: false
+        default: RogueTex/superset
+
+permissions:
+  issues: read
+  contents: read
+
+jobs:
+  route-issue:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issues' &&
+        (
+          (github.event.action == 'labeled' && github.event.label.name == 'devin-remediate') ||
+          (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'devin-remediate'))
+        )
+      )
+    steps:
+      - name: Resolve issue target
+        id: target
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "issue_number=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ inputs.repo }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "issue_number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start Devin run
+        id: start
+        shell: bash
+        env:
+          RUNNER_ENDPOINT: ${{ secrets.RUNNER_ENDPOINT }}
+          RUNNER_SHARED_TOKEN: ${{ secrets.RUNNER_SHARED_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.target.outputs.issue_number }}
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+        run: |
+          if [ -z "$RUNNER_ENDPOINT" ]; then
+            echo "RUNNER_ENDPOINT secret is required"
+            exit 1
+          fi
+
+          auth_args=()
+          if [ -n "$RUNNER_SHARED_TOKEN" ]; then
+            auth_args=(-H "Authorization: Bearer $RUNNER_SHARED_TOKEN")
+          fi
+
+          curl -fsS -X POST \
+            "${RUNNER_ENDPOINT%/}/issues/${ISSUE_NUMBER}/devin-runs?repo=${TARGET_REPO}" \
+            "${auth_args[@]}" > /tmp/devin-run.json
+
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+
+          with open("/tmp/devin-run.json", encoding="utf-8") as fh:
+              payload = json.load(fh)
+          print(f"run_id={payload['run']['id']}")
+          PY
+
+      - name: Poll and comment
+        shell: bash
+        env:
+          RUNNER_ENDPOINT: ${{ secrets.RUNNER_ENDPOINT }}
+          RUNNER_SHARED_TOKEN: ${{ secrets.RUNNER_SHARED_TOKEN }}
+          RUN_ID: ${{ steps.start.outputs.run_id }}
+        run: |
+          auth_args=()
+          if [ -n "$RUNNER_SHARED_TOKEN" ]; then
+            auth_args=(-H "Authorization: Bearer $RUNNER_SHARED_TOKEN")
+          fi
+
+          for attempt in $(seq 1 20); do
+            curl -fsS -X POST "${RUNNER_ENDPOINT%/}/runs/${RUN_ID}/poll" \
+              "${auth_args[@]}" > /tmp/devin-poll.json
+
+            ready=$(python - <<'PY'
+            import json
+
+            with open("/tmp/devin-poll.json", encoding="utf-8") as fh:
+                run = json.load(fh)["run"]
+            status = (run.get("status") or "").lower()
+            has_pr = bool(run.get("pull_request_url"))
+            terminal = status in {"exit", "stopped", "error"}
+            print("yes" if has_pr or terminal else "no")
+            PY
+            )
+            if [ "$ready" = "yes" ]; then
+              break
+            fi
+            sleep 30
+          done
+
+          curl -fsS -X POST "${RUNNER_ENDPOINT%/}/runs/${RUN_ID}/comment" \
+            "${auth_args[@]}"

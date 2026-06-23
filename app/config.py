@@ -18,7 +18,7 @@ def _clean(value: str | None) -> str | None:
 
 @dataclass(frozen=True)
 class Settings:
-    """Runtime configuration for the autopilot service."""
+    """Runtime configuration for the issue runner service."""
 
     devin_api_key: str | None = field(default_factory=lambda: _clean(os.getenv("DEVIN_API_KEY")))
     devin_org_id: str | None = field(default_factory=lambda: _clean(os.getenv("DEVIN_ORG_ID")))
@@ -35,16 +35,19 @@ class Settings:
     )
 
     db_path: str = field(
-        default_factory=lambda: _clean(os.getenv("DB_PATH")) or "data/autopilot.db"
+        default_factory=lambda: _clean(os.getenv("DB_PATH")) or "data/devin_issue_runner.db"
     )
 
-    # Default ACU ceiling for real-mode sessions; keeps demo runs cheap.
+    # Default ACU ceiling for real sessions.
     max_acu_limit: int = field(
         default_factory=lambda: int(_clean(os.getenv("MAX_ACU_LIMIT")) or "10")
     )
 
     request_timeout: float = field(
         default_factory=lambda: float(_clean(os.getenv("REQUEST_TIMEOUT")) or "30")
+    )
+    webhook_label: str = field(
+        default_factory=lambda: _clean(os.getenv("WEBHOOK_LABEL")) or "devin-remediate"
     )
 
     @property

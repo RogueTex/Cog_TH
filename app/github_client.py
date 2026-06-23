@@ -82,3 +82,41 @@ class GitHubClient:
             raise GitHubError(f"Not a recognizable GitHub PR URL: {pr_url}")
         repo, number = parsed
         return self.get_pull_request(repo, number)
+
+    def create_issue_comment(self, repo: str, issue_number: int, body: str) -> dict[str, Any]:
+        """Create an issue comment. Requires a token with issue write access."""
+        url = f"{self._api_base}/repos/{repo}/issues/{issue_number}/comments"
+        try:
+            resp = httpx.post(
+                url,
+                headers=self._headers(),
+                json={"body": body},
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise GitHubError(f"GitHub request failed: {exc}") from exc
+        if resp.status_code >= 400:
+            raise GitHubError(
+                f"GitHub returned {resp.status_code} creating issue comment "
+                f"for {repo}#{issue_number}: {resp.text[:300]}"
+            )
+        return resp.json()
+
+    def update_issue_comment(self, repo: str, comment_id: int, body: str) -> dict[str, Any]:
+        """Update an existing issue comment."""
+        url = f"{self._api_base}/repos/{repo}/issues/comments/{comment_id}"
+        try:
+            resp = httpx.patch(
+                url,
+                headers=self._headers(),
+                json={"body": body},
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise GitHubError(f"GitHub request failed: {exc}") from exc
+        if resp.status_code >= 400:
+            raise GitHubError(
+                f"GitHub returned {resp.status_code} updating issue comment "
+                f"{repo}#{comment_id}: {resp.text[:300]}"
+            )
+        return resp.json()
