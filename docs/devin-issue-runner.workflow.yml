@@ -66,13 +66,8 @@ jobs:
             "${RUNNER_ENDPOINT%/}/issues/${ISSUE_NUMBER}/devin-runs?repo=${TARGET_REPO}" \
             "${auth_args[@]}" > /tmp/devin-run.json
 
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-
-          with open("/tmp/devin-run.json", encoding="utf-8") as fh:
-              payload = json.load(fh)
-          print(f"run_id={payload['run']['id']}")
-          PY
+          run_id=$(python -c 'import json; print(json.load(open("/tmp/devin-run.json", encoding="utf-8"))["run"]["id"])')
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
       - name: Poll and comment
         shell: bash
@@ -90,17 +85,7 @@ jobs:
             curl -fsS -X POST "${RUNNER_ENDPOINT%/}/runs/${RUN_ID}/poll" \
               "${auth_args[@]}" > /tmp/devin-poll.json
 
-            ready=$(python - <<'PY'
-            import json
-
-            with open("/tmp/devin-poll.json", encoding="utf-8") as fh:
-                run = json.load(fh)["run"]
-            status = (run.get("status") or "").lower()
-            has_pr = bool(run.get("pull_request_url"))
-            terminal = status in {"exit", "stopped", "error"}
-            print("yes" if has_pr or terminal else "no")
-            PY
-            )
+            ready=$(python -c 'import json; run=json.load(open("/tmp/devin-poll.json", encoding="utf-8"))["run"]; status=(run.get("status") or "").lower(); print("yes" if run.get("pull_request_url") or status in {"exit", "stopped", "error"} else "no")')
             if [ "$ready" = "yes" ]; then
               break
             fi
