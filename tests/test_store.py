@@ -15,10 +15,10 @@ def store() -> Store:
 
 def test_create_and_get_run(store: Store):
     run = store.create_run(
-        mode="adopt",
+        mode="import",
         repo="RogueTex/superset",
         issue_number=2,
-        status="adopted",
+        status="imported",
         issue_url="https://github.com/RogueTex/superset/issues/2",
         devin_session_url="https://app.devin.ai/sessions/edd1bd6ac10b4e899ba2a886a1b5f744",
         pull_request_url="https://github.com/RogueTex/superset/pull/4",
@@ -27,12 +27,12 @@ def test_create_and_get_run(store: Store):
     fetched = store.get_run(run["id"])
     assert fetched is not None
     assert fetched["issue_number"] == 2
-    assert fetched["mode"] == "adopt"
+    assert fetched["mode"] == "import"
 
 
 def test_list_runs_orders_newest_first(store: Store):
-    a = store.create_run(mode="adopt", repo="r", issue_number=1, status="adopted")
-    b = store.create_run(mode="adopt", repo="r", issue_number=2, status="adopted")
+    a = store.create_run(mode="import", repo="r", issue_number=1, status="imported")
+    b = store.create_run(mode="import", repo="r", issue_number=2, status="imported")
     runs = store.list_runs()
     ids = [r["id"] for r in runs]
     assert set(ids) == {a["id"], b["id"]}
@@ -67,8 +67,8 @@ def test_structured_output_roundtrip(store: Store):
 def test_idempotency_find_active_real_run(store: Store):
     # No real run yet.
     assert store.find_active_real_run("r", 9) is None
-    # Adopt run should not count as a real run.
-    store.create_run(mode="adopt", repo="r", issue_number=9, status="adopted")
+    # Imported run should not count as a real run.
+    store.create_run(mode="import", repo="r", issue_number=9, status="imported")
     assert store.find_active_real_run("r", 9) is None
     # A real run is found.
     real = store.create_run(mode="real", repo="r", issue_number=9, status="new")
@@ -77,3 +77,13 @@ def test_idempotency_find_active_real_run(store: Store):
     assert found["id"] == real["id"]
     # Different issue number is isolated.
     assert store.find_active_real_run("r", 10) is None
+
+
+def test_reserve_real_run_is_idempotent(store: Store):
+    first, created = store.reserve_real_run("r", 12)
+    assert created is True
+    assert first["status"] == "queued"
+
+    second, created = store.reserve_real_run("r", 12)
+    assert created is False
+    assert second["id"] == first["id"]

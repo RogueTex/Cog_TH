@@ -1,7 +1,7 @@
 [project]
 name = "devin-issue-runner"
 version = "0.1.0"
-description = "Workflow service: GitHub issue -> Devin remediation session -> status summary."
+description = "Workflow service: GitHub issue -> Devin session -> PR/status feedback."
 requires-python = ">=3.11"
 
 [tool.ruff]

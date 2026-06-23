@@ -1,22 +1,22 @@
 services:
-  autopilot:
+  issue-runner:
     build: .
     image: devin-issue-runner:latest
     container_name: devin-issue-runner
     ports:
       - "8000:8000"
     env_file:
-      # Optional: copy .env.example to .env to enable real mode. Adopt mode
-      # works without any credentials.
+      # Optional: copy .env.example to .env to create new Devin sessions.
+      # Imported runs work without any credentials.
       - path: .env
         required: false
     environment:
       # Falls back to RogueTex/superset if not set in .env
       GITHUB_REPO: ${GITHUB_REPO:-RogueTex/superset}
-      DB_PATH: /app/data/autopilot.db
+      DB_PATH: /app/data/devin_issue_runner.db
     volumes:
-      - autopilot-data:/app/data
+      - issue-runner-data:/app/data
     restart: unless-stopped
 
 volumes:
-  autopilot-data:
+  issue-runner-data:

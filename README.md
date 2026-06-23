@@ -1,181 +1,212 @@
 # Devin Issue Runner for Superset
 
-This is a small workflow service that turns a GitHub issue into a Devin remediation run.
+Small FastAPI service that connects a GitHub issue to a Devin session, tracks the resulting pull request, and posts the outcome back to the issue.
 
-The concrete example is my Superset fork. Issue #2 tracks a Helm chart cleanup: removing the old `dockerize` init image from startup waits. Devin opened PR #4 for that change. This service is the control layer around that flow: it can start a Devin session from an issue, store the run, poll session/PR status, and show a short status summary.
+The concrete target is my Superset fork. Issue #2 tracks a Helm chart cleanup: removing the old `dockerize` init image from startup waits. Devin opened PR #4 for that change. This repo is the control layer around that flow.
 
-I kept the service small on purpose: FastAPI, SQLite, Docker, and direct GitHub/Devin API calls.
+## Reference Run
 
----
-
-## Example run
-
-| Artifact | Link |
+| Item | Link |
 |---|---|
 | Superset fork | https://github.com/RogueTex/superset |
 | Issue #2 | https://github.com/RogueTex/superset/issues/2 |
 | Devin PR #4 | https://github.com/RogueTex/superset/pull/4 |
 | Devin session | https://app.devin.ai/sessions/edd1bd6ac10b4e899ba2a886a1b5f744 |
 
----
+## What It Does
 
-## How it works
+1. Watches for a GitHub issue labeled `devin-remediate`.
+2. Fetches the issue and turns it into a focused Devin work order.
+3. Creates a Devin v3 session with a structured output schema.
+4. Polls Devin and GitHub for session, PR, and validation state.
+5. Stores each run in SQLite.
+6. Posts a concise status comment back to the GitHub issue.
+7. Exposes `/status`, `/dashboard`, and `/summary` so the workflow is easy to inspect.
 
-`POST /simulate` is the entry point: given an `issue_number`, it fetches the issue from GitHub, builds a work-order prompt, and dispatches a Devin session to fix it. In a real deployment you'd wire this to a GitHub webhook (`issues.opened` / `issues.labeled`); here it's an HTTP endpoint for easy triggering and testing. Each call produces a durable **run** record that tracks the session and PR as they progress.
+## Why Devin
 
-### Two modes
+The useful unit here is not "run a script when a label changes." The useful unit is handing a scoped repository problem to a coding agent that can inspect the repo, make a branch, open a PR, and return structured status.
 
-- **Real mode** (`POST /simulate`) — fetches the issue from GitHub and creates a *new* Devin session. Requires `DEVIN_API_KEY`, `DEVIN_ORG_ID`, and `GITHUB_TOKEN`.
-- **Adopt mode** (`POST /adopt`) — records an *already-created* session + PR without calling the Devin API. This makes the demo reproducible immediately using issue #2, PR #4, and the existing session — no credentials required.
+This service keeps the orchestration boring: GitHub owns the queue, Devin owns the code change, SQLite records state, and the issue thread gets the update a reviewer actually needs.
 
-### Architecture
+## Architecture
 
 ```
-GitHub issue  -->  POST /simulate  -->  build work-order prompt  -->  Devin v3 session
-   (event)              |                  (app/prompts.py)            (app/devin_client.py)
-                        v                                                      |
-                   SQLite run record  <--------- poll status / PR <-----------'
-                   (app/store.py)        (POST /runs/{id}/poll)
-                        |
-                        v
-                   GET /summary  -->  Markdown status summary (app/report.py)
+GitHub issue label
+        |
+        v
+GitHub Actions or webhook
+        |
+        v
+POST /issues/{issue_number}/devin-runs
+        |
+        v
+GitHub issue fetch -> Devin work order -> Devin v3 session
+        |
+        v
+SQLite run record
+        |
+        v
+POST /runs/{run_id}/poll
+        |
+        v
+GitHub PR metadata + issue comment
+        |
+        v
+/status, /dashboard, /summary
 ```
 
-### Layout
+## Repo Layout
 
 ```
 app/
-  main.py           FastAPI app + endpoints
-  config.py         env-var configuration
-  devin_client.py   Devin v3 API client (httpx)
-  github_client.py  GitHub REST client (httpx)
-  store.py          SQLite persistence for runs
-  prompts.py        work-order prompt + structured-output schema
-  report.py         Markdown status summary renderer
+  main.py           FastAPI routes and workflow glue
+  config.py         environment configuration
+  devin_client.py   Devin v3 API client
+  github_client.py  GitHub issue, PR, and comment client
+  store.py          SQLite persistence
+  prompts.py        Devin work-order prompt and structured-output schema
+  summary.py        Markdown status summary renderer
+docs/
+  devin-issue-runner.workflow.yml
 tests/
-  test_prompts.py   prompt construction
-  test_store.py     persistence + idempotency
-  test_api.py       adopt / summary / simulate-idempotency (FastAPI TestClient)
-Dockerfile  docker-compose.yml  Makefile  .env.example  .gitignore
+  test_api.py
+  test_prompts.py
+  test_store.py
+Dockerfile
+docker-compose.yml
+Makefile
+.env.example
 ```
 
----
-
 ## Setup
-
-Requires Python 3.11+ (for local runs) or Docker.
 
 ```bash
 git clone https://github.com/RogueTex/Cog_TH.git
 cd Cog_TH
-make env          # creates .env from .env.example
+make env
 ```
 
-### Environment variables
+Fill `.env` when you want the service to create new Devin sessions or post issue comments.
 
-| Var | Required for | Description |
+| Variable | Required for | Notes |
 |---|---|---|
-| `DEVIN_API_KEY` | real mode | Devin API key (Bearer token) |
-| `DEVIN_ORG_ID` | real mode | Org id, prefixed `org-` |
-| `GITHUB_TOKEN` | real mode | GitHub PAT with issue/PR read access |
-| `GITHUB_REPO` | both | Target repo, defaults to `RogueTex/superset` |
-| `MAX_ACU_LIMIT` | optional | ACU ceiling per real session (default `10`) |
-| `DB_PATH`, `DEVIN_API_BASE`, `GITHUB_API_BASE`, `REQUEST_TIMEOUT` | optional | overrides |
+| `DEVIN_API_KEY` | creating/polling Devin sessions | Bearer token |
+| `DEVIN_ORG_ID` | creating/polling Devin sessions | Must include the `org-` prefix |
+| `GITHUB_TOKEN` | issue fetch, PR poll, issue comment | Fine-grained token with issue read/write and PR read access |
+| `GITHUB_REPO` | all modes | Defaults to `RogueTex/superset` |
+| `WEBHOOK_LABEL` | trigger filtering | Defaults to `devin-remediate` |
+| `MAX_ACU_LIMIT` | Devin session creation | Defaults to `10` |
+| `DB_PATH` | persistence | Defaults to `data/devin_issue_runner.db` locally |
 
-> Adopt mode needs **none** of the credentials — it is the zero-setup demo path.
-
----
-
-## Run with Docker
+## Run
 
 ```bash
 docker compose up --build
-# API on http://localhost:8000  (interactive docs at /docs)
 ```
 
-SQLite state is persisted in the `autopilot-data` volume.
+The API is available at `http://localhost:8000`. Interactive docs are at `/docs`.
 
-### Run locally (no Docker)
+Local Python path:
 
 ```bash
-make dev      # install runtime + dev deps
-make run      # uvicorn with autoreload on :8000
-make test     # run the test suite
-make lint     # ruff
+make dev
+make run
 ```
-
----
 
 ## Walkthrough
 
-1. **Start the service**
-   ```bash
-   docker compose up --build
-   ```
+Import the known Superset run:
 
-2. **Check health**
-   ```bash
-   curl http://localhost:8000/health
-   ```
+```bash
+curl -fsS -X POST http://localhost:8000/runs/import \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "issue_number": 2,
+        "devin_session_url": "https://app.devin.ai/sessions/edd1bd6ac10b4e899ba2a886a1b5f744",
+        "pull_request_url": "https://github.com/RogueTex/superset/pull/4",
+        "issue_title": "Remove dockerize init image from Helm startup waits"
+      }'
+```
 
-3. **Adopt the existing run** (issue #2 / PR #4 / Devin session)
-   ```bash
-   curl -X POST http://localhost:8000/adopt \
-     -H 'Content-Type: application/json' \
-     -d '{
-           "issue_number": 2,
-           "devin_session_url": "https://app.devin.ai/sessions/edd1bd6ac10b4e899ba2a886a1b5f744",
-           "pull_request_url": "https://github.com/RogueTex/superset/pull/4",
-           "issue_title": "Remove dockerize init image from Helm startup waits"
-         }'
-   ```
+Inspect the state:
 
-4. **View runs**
-   ```bash
-   curl http://localhost:8000/runs
-   ```
+```bash
+curl -fsS http://localhost:8000/status
+curl -fsS http://localhost:8000/summary
+open http://localhost:8000/dashboard
+```
 
-5. **View the status summary**
-   ```bash
-   curl http://localhost:8000/summary
-   ```
+Create a new Devin session from an issue:
 
-6. **Create a new Devin session** (requires credentials in `.env`)
-   ```bash
-   curl -X POST http://localhost:8000/simulate \
-     -H 'Content-Type: application/json' \
-     -d '{"issue_number": 2}'
-   ```
-   `/simulate` creates a real Devin session when `DEVIN_API_KEY`, `DEVIN_ORG_ID`, and `GITHUB_TOKEN` are set.
+```bash
+curl -fsS -X POST \
+  'http://localhost:8000/issues/2/devin-runs?repo=RogueTex/superset'
+```
 
----
+Poll a run and post the issue comment:
 
-## API reference
+```bash
+curl -fsS -X POST 'http://localhost:8000/runs/<run_id>/poll?post_comment=true'
+```
+
+## GitHub Trigger
+
+The workflow template in `docs/devin-issue-runner.workflow.yml` runs on:
+
+- an issue opened with label `devin-remediate`
+- an issue later labeled `devin-remediate`
+- manual dispatch with an issue number
+
+Copy it to `.github/workflows/devin-issue-runner.yml` in the target repo, such
+as `RogueTex/superset`, when you want issue label events to route that same
+repo. From this repo, use manual dispatch or the HTTP endpoint directly.
+
+It starts the run, polls for a PR or terminal status, and then posts the issue
+comment. The first call is:
+
+```text
+POST {RUNNER_ENDPOINT}/issues/{issue_number}/devin-runs?repo={repo}
+```
+
+Set these repository secrets before relying on the workflow:
+
+| Secret | Purpose |
+|---|---|
+| `RUNNER_ENDPOINT` | Public URL for this FastAPI service |
+| `RUNNER_SHARED_TOKEN` | Optional bearer token if you put the service behind an auth proxy |
+
+For a local walkthrough, skip Actions and call the endpoint with `curl`.
+
+## API
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/simulate` | Create a Devin session from an issue (`issue_number`, optional `repo`, `force`) |
-| `POST` | `/adopt` | Record an existing issue + session + PR (`issue_number`, `devin_session_url`, `pull_request_url`) |
-| `GET` | `/runs` | List all runs |
+| `POST` | `/issues/{issue_number}/devin-runs` | Create a Devin session from a GitHub issue |
+| `POST` | `/runs/import` | Record an existing issue, Devin session, and PR |
+| `POST` | `/webhooks/github` | Accept issue events from a webhook-compatible caller |
+| `GET` | `/runs` | List tracked runs |
 | `GET` | `/runs/{run_id}` | Fetch one run |
-| `POST` | `/runs/{run_id}/poll` | Refresh Devin session status + PR metadata |
-| `GET` | `/summary` | Markdown status summary |
-| `GET` | `/summary.json` | JSON-wrapped status summary |
-| `GET` | `/` , `/health` | Service info / liveness |
-
----
+| `POST` | `/runs/{run_id}/poll` | Refresh Devin and GitHub state |
+| `POST` | `/runs/{run_id}/comment` | Post the current run state to the GitHub issue |
+| `GET` | `/status` | JSON metrics |
+| `GET` | `/dashboard` | HTML dashboard |
+| `GET` | `/summary` | Markdown summary |
+| `GET` | `/summary.json` | JSON-wrapped Markdown summary |
+| `GET` | `/health` | Liveness check |
 
 ## Tests
 
 ```bash
-make test     # pytest: prompt construction, store idempotency, adopt/summary/simulate
-make lint     # ruff
+make test
+make lint
 ```
 
----
+The tests cover prompt construction, SQLite persistence, import idempotency, trigger filtering, repo-bound PR URLs, status rendering, issue comment create/update, and a mocked labeled-issue loop through status and dashboard.
 
-## Notes
+## Boundaries
 
-- This project **does not modify** `RogueTex/superset` and **does not merge** PR #4.
-- No real secrets are committed; `.env` is git-ignored and only `.env.example` ships.
-- The Devin v3 API has no server-side idempotency flag, so idempotency is enforced locally in the store (one real session per issue unless `force=true`).
+- The service does not merge PRs.
+- The service does not commit secrets.
+- Imported runs let reviewers inspect the known issue #2 -> PR #4 path without spending Devin credits.
+- New sessions require real `DEVIN_API_KEY`, `DEVIN_ORG_ID`, and `GITHUB_TOKEN` values.
