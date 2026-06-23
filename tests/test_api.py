@@ -65,7 +65,7 @@ def test_report_contains_adopted_run(client: TestClient):
         },
     )
     report = client.get("/report").text
-    assert "# Devin Autopilot" in report
+    assert "# Devin Issue Runner" in report
     assert "#2" in report
     assert "Remove dockerize init image" in report
     assert "/pull/4" in report

@@ -1,4 +1,4 @@
-"""Render an engineering-leadership Markdown report from stored runs."""
+"""Render a Markdown status summary from stored runs."""
 from __future__ import annotations
 
 from typing import Any
@@ -19,7 +19,7 @@ def _link(url: str | None, label: str | None = None) -> str:
 
 
 def build_report(runs: list[dict[str, Any]], *, repo: str) -> str:
-    """Build a Markdown leadership report summarizing all automation runs."""
+    """Build a Markdown status summary of all automation runs."""
     total = len(runs)
     with_session = sum(1 for r in runs if r.get("devin_session_url"))
     with_pr = sum(1 for r in runs if r.get("pull_request_url"))
@@ -28,7 +28,7 @@ def build_report(runs: list[dict[str, Any]], *, repo: str) -> str:
     open_runs = sum(1 for r in runs if (r.get("status") or "").lower() in _OPEN_STATUSES)
 
     lines: list[str] = []
-    lines.append("# Devin Autopilot — Remediation Report")
+    lines.append("# Devin Issue Runner — Status Summary")
     lines.append("")
     lines.append(f"_Repository:_ `{repo}`")
     lines.append("")

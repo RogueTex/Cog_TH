@@ -6,7 +6,7 @@ Endpoints:
     GET  /runs              list all runs
     GET  /runs/{run_id}     fetch one run
     POST /runs/{run_id}/poll  refresh status from Devin + GitHub
-    GET  /report            Markdown leadership report
+    GET  /summary           Markdown status summary (alias: /report)
 """
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ from app.report import build_report
 from app.store import Store
 
 app = FastAPI(
-    title="cognition-devin-autopilot",
+    title="devin-issue-runner",
     version=__version__,
-    description="Event-driven automation: GitHub issue -> Devin remediation session -> report.",
+    description="Workflow service: GitHub issue -> Devin remediation session -> status summary.",
 )
 
 
@@ -108,12 +108,15 @@ def _first_pr_url(session: dict[str, Any]) -> tuple[str | None, str | None]:
 def root() -> dict[str, Any]:
     settings = _settings()
     return {
-        "service": "cognition-devin-autopilot",
+        "service": "devin-issue-runner",
         "version": __version__,
         "repo": settings.github_repo,
         "devin_configured": settings.devin_configured,
         "github_configured": settings.github_configured,
-        "endpoints": ["/simulate", "/adopt", "/runs", "/runs/{id}", "/runs/{id}/poll", "/report"],
+        "endpoints": [
+            "/simulate", "/adopt", "/runs", "/runs/{id}",
+            "/runs/{id}/poll", "/summary", "/report",
+        ],
     }
 
 
@@ -291,15 +294,19 @@ def poll_run(run_id: str) -> dict[str, Any]:
     return {"run": updated, "notes": notes}
 
 
-@app.get("/report", response_class=PlainTextResponse)
-def report() -> str:
+@app.get("/summary", response_class=PlainTextResponse)
+@app.get("/report", response_class=PlainTextResponse, include_in_schema=False)
+def summary() -> str:
+    """Markdown status summary of all runs."""
     settings = _settings()
     runs = store.list_runs()
     return build_report(runs, repo=settings.github_repo)
 
 
-@app.get("/report.json")
-def report_json() -> dict[str, Any]:
+@app.get("/summary.json")
+@app.get("/report.json", include_in_schema=False)
+def summary_json() -> dict[str, Any]:
+    """JSON-wrapped status summary."""
     settings = _settings()
     runs = store.list_runs()
     return {"markdown": build_report(runs, repo=settings.github_repo)}

@@ -76,4 +76,4 @@ def get_settings() -> Settings:
 
 
 # Shared tags applied to every Devin session created by this automation.
-DEFAULT_TAGS: tuple[str, ...] = ("cognition-takehome", "superset", "devin-remediate")
+DEFAULT_TAGS: tuple[str, ...] = ("devin-workflow", "superset", "devin-remediate")

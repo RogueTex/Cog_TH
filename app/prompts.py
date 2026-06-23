@@ -51,7 +51,7 @@ def build_work_order(
     title = issue_title.strip() or f"Issue #{issue_number}"
 
     return f"""\
-You are an autonomous remediation engineer working on the repository `{repo}`.
+You are a software engineer working on the repository `{repo}`.
 
 A GitHub issue has been detected and routed to you for a fix.
 
