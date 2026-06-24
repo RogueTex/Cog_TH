@@ -217,9 +217,12 @@ make lint
 
 The tests cover prompt construction, SQLite persistence, import idempotency, trigger filtering, repo-bound PR URLs, status rendering, issue comment create/update, and a mocked labeled-issue loop through status and dashboard.
 
-## Next Extensions
+## Possible Extensions
 
-- Add reviewer routing based on issue labels or changed files.
+These are not part of the current runner. They are the next places I would extend
+the same control-loop pattern:
+
+- Route reviewers based on issue labels or changed files.
 - Require a validation signal before posting a success comment.
 - Send status updates to Slack or another team channel.
 - Track trend metrics across multiple repositories and labels.
