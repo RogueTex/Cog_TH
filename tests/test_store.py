@@ -87,3 +87,59 @@ def test_reserve_real_run_is_idempotent(store: Store):
     second, created = store.reserve_real_run("r", 12)
     assert created is False
     assert second["id"] == first["id"]
+
+
+def test_display_status_derivation(store: Store):
+    """display_status is computed from raw status + pr_state + structured_output."""
+    from app.store import derive_display_status
+
+    # imported with no pr_state stays imported
+    run = store.create_run(
+        mode="import", repo="r", issue_number=20, status="imported",
+        pull_request_url="http://x/pull/1",
+    )
+    assert run["display_status"] == "imported"
+
+    # exit + PR = pr_open
+    run2 = store.create_run(
+        mode="real", repo="r", issue_number=21, status="exit",
+        pull_request_url="http://x/pull/2",
+    )
+    assert run2["display_status"] == "pr_open"
+
+    # exit + pr_state merged = pr_merged
+    run3 = store.create_run(
+        mode="real", repo="r", issue_number=22, status="exit",
+        pull_request_url="http://x/pull/3", pr_state="merged",
+    )
+    assert run3["display_status"] == "pr_merged"
+
+    # running + PR + structured_output = pr_open (not raw "running")
+    run4 = store.create_run(
+        mode="real", repo="r", issue_number=23, status="running",
+        pull_request_url="http://x/pull/4",
+        structured_output={"summary": "fixed", "pull_request_url": "http://x/pull/4"},
+    )
+    assert run4["display_status"] == "pr_open"
+
+    # running with no PR stays running
+    run5 = store.create_run(
+        mode="real", repo="r", issue_number=24, status="running",
+    )
+    assert run5["display_status"] == "running"
+
+    # error = needs_attention
+    run6 = store.create_run(
+        mode="real", repo="r", issue_number=25, status="error",
+    )
+    assert run6["display_status"] == "needs_attention"
+
+    # exit with no PR = completed_no_pr
+    run7 = store.create_run(
+        mode="real", repo="r", issue_number=26, status="exit",
+    )
+    assert run7["display_status"] == "completed_no_pr"
+
+    # standalone function works too
+    assert derive_display_status({"status": "running", "pull_request_url": "x"}) == "pr_open"
+    assert derive_display_status({"status": "exit", "pr_state": "merged"}) == "pr_merged"

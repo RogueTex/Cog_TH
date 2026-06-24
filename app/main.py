@@ -308,8 +308,8 @@ def _status_payload(settings: Settings) -> dict[str, Any]:
     runs = store.list_runs()
     status_counts: dict[str, int] = {}
     for run in runs:
-        status = str(run.get("status") or "unknown")
-        status_counts[status] = status_counts.get(status, 0) + 1
+        ds = str(run.get("display_status") or run.get("status") or "unknown")
+        status_counts[ds] = status_counts.get(ds, 0) + 1
     return {
         "repo": settings.github_repo,
         "configured": {
@@ -578,10 +578,11 @@ def dashboard() -> str:
     data = _status_payload(_settings())
     rows = []
     for run in data["recent_runs"]:
+        ds = run.get("display_status") or run.get("status")
         rows.append(
             "<tr>"
             f"<td>#{_html_text(run.get('issue_number'))}</td>"
-            f"<td>{_html_text(run.get('status'))}</td>"
+            f"<td>{_html_text(ds)}</td>"
             f"<td>{_html_text(run.get('mode'))}</td>"
             f"<td>{_html_link(run.get('devin_session_url'), 'session')}</td>"
             f"<td>{_html_link(run.get('pull_request_url'), 'PR')}</td>"

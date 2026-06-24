@@ -57,6 +57,52 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+_TERMINAL_DEVIN = {"exit", "stopped", "finished"}
+_ACTIVE_DEVIN = {"new", "queued", "claimed", "running", "resuming", "created"}
+
+
+def derive_display_status(run: dict[str, Any]) -> str:
+    """Compute a human-friendly status from raw Devin session state + PR metadata.
+
+    The raw ``status`` field mirrors whatever the Devin API last reported.  This
+    function combines it with ``pr_state``, ``pull_request_url``, and
+    ``structured_output`` to produce a label that actually tells a reviewer what
+    to do next.
+    """
+    raw = (run.get("status") or "unknown").lower()
+    pr_state = (run.get("pr_state") or "").lower()
+    has_pr = bool(run.get("pull_request_url"))
+    has_structured = isinstance(run.get("structured_output"), dict) and bool(
+        run.get("structured_output")
+    )
+
+    if raw == "error":
+        return "needs_attention"
+
+    if raw == "imported":
+        if pr_state == "merged":
+            return "pr_merged"
+        return "imported"
+
+    if raw in _TERMINAL_DEVIN:
+        if pr_state == "merged":
+            return "pr_merged"
+        if has_pr:
+            return "pr_open"
+        return "completed_no_pr"
+
+    if raw in _ACTIVE_DEVIN:
+        if pr_state == "merged":
+            return "pr_merged"
+        if has_pr and has_structured:
+            return "pr_open"
+        if has_pr:
+            return "pr_open"
+        return raw
+
+    return raw
+
+
 class Store:
     """Thin wrapper around a SQLite database of automation runs."""
 
@@ -261,6 +307,7 @@ class Store:
                 data["structured_output"] = json.loads(raw)
             except (TypeError, json.JSONDecodeError):
                 pass
+        data["display_status"] = derive_display_status(data)
         return data
 
     def _ensure_columns(self) -> None:
