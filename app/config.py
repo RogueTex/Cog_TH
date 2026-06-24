@@ -49,6 +49,9 @@ class Settings:
     webhook_label: str = field(
         default_factory=lambda: _clean(os.getenv("WEBHOOK_LABEL")) or "devin-remediate"
     )
+    runner_shared_token: str | None = field(
+        default_factory=lambda: _clean(os.getenv("RUNNER_SHARED_TOKEN"))
+    )
 
     @property
     def devin_configured(self) -> bool:
@@ -57,6 +60,10 @@ class Settings:
     @property
     def github_configured(self) -> bool:
         return bool(self.github_token)
+
+    @property
+    def runner_auth_configured(self) -> bool:
+        return bool(self.runner_shared_token)
 
     def missing_for_real_mode(self) -> list[str]:
         """Return env vars required for real mode that are not set."""

@@ -69,6 +69,9 @@ jobs:
           run_id=$(python -c 'import json; print(json.load(open("/tmp/devin-run.json", encoding="utf-8"))["run"]["id"])')
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
+          curl -fsS -X POST "${RUNNER_ENDPOINT%/}/runs/${run_id}/comment" \
+            "${auth_args[@]}" > /tmp/devin-start-comment.json
+
       - name: Poll and comment
         shell: bash
         env:

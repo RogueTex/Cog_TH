@@ -109,6 +109,7 @@ Fill `.env` when you want the service to create new Devin sessions or post issue
 | `GITHUB_TOKEN` | issue fetch, PR poll, issue comment | Fine-grained token with issue read/write and PR read access |
 | `GITHUB_REPO` | all modes | Defaults to `RogueTex/superset` |
 | `WEBHOOK_LABEL` | trigger filtering | Defaults to `devin-remediate` |
+| `RUNNER_SHARED_TOKEN` | public runner protection | Optional bearer token expected on mutating endpoints |
 | `MAX_ACU_LIMIT` | Devin session creation | Defaults to `10` |
 | `DB_PATH` | persistence | Defaults to `data/devin_issue_runner.db` locally |
 
@@ -127,7 +128,55 @@ make dev
 make run
 ```
 
-## Walkthrough
+## Primary Demo: GitHub Label Trigger
+
+Use this path when you want the workflow to look like a real team interaction:
+a maintainer labels an issue, GitHub Actions calls the runner, Devin starts, and
+the issue thread gets the status update.
+
+1. Start the runner with real credentials:
+
+   ```bash
+   docker compose up --build
+   ```
+
+2. Expose the runner at an HTTPS URL that GitHub Actions can reach, for example:
+
+   ```bash
+   cloudflared tunnel --url http://localhost:8000
+   ```
+
+3. In the target repository, set Actions secrets:
+
+   | Secret | Purpose |
+   |---|---|
+   | `RUNNER_ENDPOINT` | Public URL for this FastAPI service |
+   | `RUNNER_SHARED_TOKEN` | Optional bearer token; set it if `RUNNER_SHARED_TOKEN` is set in the runner env |
+
+4. Confirm the workflow exists in the target repo at:
+
+   ```text
+   .github/workflows/devin-issue-runner.yml
+   ```
+
+   The included Superset fork uses the same workflow as
+   `docs/devin-issue-runner.workflow.yml`.
+
+5. Trigger a run by adding the `devin-remediate` label to a scoped issue, or by
+   using the workflow's manual dispatch with an issue number.
+
+6. Watch the visible trail:
+
+   - GitHub Actions run starts.
+   - The issue receives a "Devin issue runner update" comment.
+   - `/dashboard` shows the tracked run.
+   - `/status` shows the JSON metrics.
+   - Devin session and PR links appear as they become available.
+
+For a five-minute walkthrough, start a fresh run live and then show the reference
+run below as the completed path.
+
+## Local Fallback
 
 Import the known Superset run:
 
@@ -163,9 +212,15 @@ Poll a run and post the issue comment:
 curl -fsS -X POST 'http://localhost:8000/runs/<run_id>/poll?post_comment=true'
 ```
 
+If `RUNNER_SHARED_TOKEN` is set on the runner, include:
+
+```bash
+-H "Authorization: Bearer $RUNNER_SHARED_TOKEN"
+```
+
 ## GitHub Trigger
 
-The workflow template in `docs/devin-issue-runner.workflow.yml` runs on:
+The workflow in `docs/devin-issue-runner.workflow.yml` runs on:
 
 - an issue opened with label `devin-remediate`
 - an issue later labeled `devin-remediate`
@@ -176,7 +231,8 @@ as `RogueTex/superset`, when you want issue label events to route that same
 repo. From this repo, use manual dispatch or the HTTP endpoint directly.
 
 It starts the run, polls for a PR or terminal status, and then posts the issue
-comment. The first call is:
+comment. It also posts an immediate start comment so the issue thread shows that
+the run was accepted before Devin finishes. The first call is:
 
 ```text
 POST {RUNNER_ENDPOINT}/issues/{issue_number}/devin-runs?repo={repo}
@@ -187,7 +243,7 @@ Set these repository secrets before relying on the workflow:
 | Secret | Purpose |
 |---|---|
 | `RUNNER_ENDPOINT` | Public URL for this FastAPI service |
-| `RUNNER_SHARED_TOKEN` | Optional bearer token if you put the service behind an auth proxy |
+| `RUNNER_SHARED_TOKEN` | Optional bearer token for protected runner endpoints |
 
 For a local walkthrough, skip Actions and call the endpoint with `curl`.
 
@@ -231,5 +287,6 @@ the same control-loop pattern:
 
 - The service does not merge PRs.
 - The service does not commit secrets.
+- `RUNNER_SHARED_TOKEN` protects mutating endpoints when configured; raw GitHub webhook signature verification is not implemented.
 - Imported runs let reviewers inspect the known issue #2 -> PR #4 path without spending Devin credits.
 - New sessions require real `DEVIN_API_KEY`, `DEVIN_ORG_ID`, and `GITHUB_TOKEN` values.

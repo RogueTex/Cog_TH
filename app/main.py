@@ -18,7 +18,7 @@ import html
 import time
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -233,6 +233,16 @@ def _create_real_run(
     return {"run": run, "idempotent": False}
 
 
+def _require_runner_auth(authorization: str | None = Header(default=None)) -> None:
+    """Require a shared bearer token when RUNNER_SHARED_TOKEN is configured."""
+    settings = _settings()
+    if not settings.runner_shared_token:
+        return
+    expected = f"Bearer {settings.runner_shared_token}"
+    if authorization != expected:
+        raise HTTPException(status_code=401, detail="Missing or invalid runner token.")
+
+
 def _comment_body(run: dict[str, Any]) -> str:
     lines = [
         "### Devin issue runner update",
@@ -305,6 +315,7 @@ def _status_payload(settings: Settings) -> dict[str, Any]:
         "configured": {
             "devin": settings.devin_configured,
             "github": settings.github_configured,
+            "runner_auth": settings.runner_auth_configured,
             "webhook_label": settings.webhook_label,
         },
         "metrics": {
@@ -329,6 +340,7 @@ def root() -> dict[str, Any]:
         "repo": settings.github_repo,
         "devin_configured": settings.devin_configured,
         "github_configured": settings.github_configured,
+        "runner_auth_configured": settings.runner_auth_configured,
         "endpoints": [
             "/issues/{issue_number}/devin-runs",
             "/runs/import",
@@ -356,6 +368,7 @@ def create_devin_run(
     issue_number: int,
     repo: str | None = None,
     force: bool = False,
+    _: None = Depends(_require_runner_auth),
 ) -> dict[str, Any]:
     """Create a Devin session from a GitHub issue."""
     settings = _settings()
@@ -368,7 +381,10 @@ def create_devin_run(
 
 
 @app.post("/runs/import")
-def import_run(req: ImportRunRequest) -> dict[str, Any]:
+def import_run(
+    req: ImportRunRequest,
+    _: None = Depends(_require_runner_auth),
+) -> dict[str, Any]:
     """Import an existing issue + Devin session + PR without API calls."""
     settings = _settings()
     repo = req.repo or settings.github_repo
@@ -428,7 +444,11 @@ def get_run(run_id: str) -> dict[str, Any]:
 
 
 @app.post("/runs/{run_id}/poll")
-def poll_run(run_id: str, post_comment: bool = False) -> dict[str, Any]:
+def poll_run(
+    run_id: str,
+    post_comment: bool = False,
+    _: None = Depends(_require_runner_auth),
+) -> dict[str, Any]:
     """Refresh a run: pull session status from Devin and PR metadata from GitHub."""
     run = store.get_run(run_id)
     if not run:
@@ -492,7 +512,11 @@ def poll_run(run_id: str, post_comment: bool = False) -> dict[str, Any]:
 
 
 @app.post("/runs/{run_id}/comment")
-def comment_run(run_id: str, req: CommentRequest | None = None) -> dict[str, Any]:
+def comment_run(
+    run_id: str,
+    req: CommentRequest | None = None,
+    _: None = Depends(_require_runner_auth),
+) -> dict[str, Any]:
     """Post the current run status back to the GitHub issue."""
     run = store.get_run(run_id)
     if not run:
@@ -506,7 +530,10 @@ def comment_run(run_id: str, req: CommentRequest | None = None) -> dict[str, Any
 
 
 @app.post("/webhooks/github")
-def github_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+def github_webhook(
+    payload: dict[str, Any],
+    _: None = Depends(_require_runner_auth),
+) -> dict[str, Any]:
     """Accept GitHub issue events and route labeled issues into Devin."""
     settings = _settings()
     action = payload.get("action")

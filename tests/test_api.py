@@ -15,6 +15,7 @@ def client(tmp_path, monkeypatch) -> TestClient:
     monkeypatch.delenv("DEVIN_API_KEY", raising=False)
     monkeypatch.delenv("DEVIN_ORG_ID", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("RUNNER_SHARED_TOKEN", raising=False)
 
     import app.main as main
 
@@ -99,6 +100,38 @@ def test_devin_run_requires_credentials(client: TestClient):
     resp = client.post("/issues/2/devin-runs?repo=RogueTex/superset")
     assert resp.status_code == 400
     assert "DEVIN_API_KEY" in resp.json()["detail"]
+
+
+def test_runner_shared_token_protects_mutating_endpoints(tmp_path, monkeypatch):
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "auth.db"))
+    monkeypatch.setenv("GITHUB_REPO", "RogueTex/superset")
+    monkeypatch.setenv("RUNNER_SHARED_TOKEN", "secret-runner-token")
+
+    import app.main as main
+
+    importlib.reload(main)
+    c = TestClient(main.app)
+
+    no_auth = c.post("/runs/import", json=_import_payload())
+    assert no_auth.status_code == 401
+
+    wrong_auth = c.post(
+        "/runs/import",
+        json=_import_payload(),
+        headers={"Authorization": "Bearer wrong"},
+    )
+    assert wrong_auth.status_code == 401
+
+    ok = c.post(
+        "/runs/import",
+        json=_import_payload(),
+        headers={"Authorization": "Bearer secret-runner-token"},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["run"]["issue_number"] == 2
+
+    status = c.get("/status").json()
+    assert status["configured"]["runner_auth"] is True
 
 
 def test_devin_run_is_idempotent(tmp_path, monkeypatch):
