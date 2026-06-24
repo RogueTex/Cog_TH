@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-_OPEN_STATUSES = {"new", "claimed", "running", "resuming", "imported", "created"}
+_OPEN_DISPLAY = {"new", "queued", "claimed", "running", "resuming", "created",
+                 "imported", "pr_open"}
 
 
 def _fmt(value: Any, fallback: str = "n/a") -> str:
@@ -25,7 +26,10 @@ def build_summary(runs: list[dict[str, Any]], *, repo: str) -> str:
     with_pr = sum(1 for r in runs if r.get("pull_request_url"))
     imported = sum(1 for r in runs if r.get("mode") == "import")
     real = sum(1 for r in runs if r.get("mode") == "real")
-    open_runs = sum(1 for r in runs if (r.get("status") or "").lower() in _OPEN_STATUSES)
+    open_runs = sum(
+        1 for r in runs
+        if (r.get("display_status") or r.get("status") or "").lower() in _OPEN_DISPLAY
+    )
 
     lines: list[str] = []
     lines.append("# Devin Issue Runner - Status Summary")
@@ -57,9 +61,10 @@ def build_summary(runs: list[dict[str, Any]], *, repo: str) -> str:
         issue = _link(r.get("issue_url"), f"#{r.get('issue_number')}")
         session = _link(r.get("devin_session_url"), "session")
         pr = _link(r.get("pull_request_url"), "PR")
+        display = r.get("display_status") or r.get("status")
         lines.append(
             f"| {issue} | {_fmt(r.get('mode'))} | {session} | {pr} | "
-            f"{_fmt(r.get('pr_state'))} | {_fmt(r.get('status'))} |"
+            f"{_fmt(r.get('pr_state'))} | {_fmt(display)} |"
         )
     lines.append("")
 
@@ -74,7 +79,8 @@ def build_summary(runs: list[dict[str, Any]], *, repo: str) -> str:
         lines.append(f"- **Devin session:** {_link(r.get('devin_session_url'))}")
         lines.append(f"- **Pull request:** {_link(r.get('pull_request_url'))} "
                      f"(state: {_fmt(r.get('pr_state'))})")
-        lines.append(f"- **Status:** {_fmt(r.get('status'))}")
+        display = r.get("display_status") or r.get("status")
+        lines.append(f"- **Status:** {_fmt(display)}")
 
         structured = r.get("structured_output")
         if isinstance(structured, dict) and structured:
@@ -91,19 +97,22 @@ def build_summary(runs: list[dict[str, Any]], *, repo: str) -> str:
     lines.append("")
     risk_lines: list[str] = []
     for r in runs:
-        status = (r.get("status") or "").lower()
-        pr_state = (r.get("pr_state") or "").lower()
+        ds = (r.get("display_status") or r.get("status") or "").lower()
         num = r.get("issue_number")
-        if status == "error":
+        if ds == "needs_attention":
             risk_lines.append(f"- Issue #{num}: session errored - needs human triage.")
+        elif ds == "completed_no_pr":
+            risk_lines.append(
+                f"- Issue #{num}: session finished with no PR - investigate or re-poll."
+            )
+        elif ds == "pr_merged":
+            continue
+        elif ds == "pr_open":
+            risk_lines.append(f"- Issue #{num}: PR open - needs human review & merge.")
         elif not r.get("pull_request_url"):
             risk_lines.append(
                 f"- Issue #{num}: no PR yet - monitor the Devin session or re-poll."
             )
-        elif pr_state == "merged":
-            continue
-        elif pr_state == "open":
-            risk_lines.append(f"- Issue #{num}: PR open - needs human review & merge.")
         else:
             risk_lines.append(
                 f"- Issue #{num}: PR recorded (state unknown) - run poll, then review & merge."
