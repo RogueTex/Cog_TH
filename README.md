@@ -1,8 +1,14 @@
 # Devin Issue Runner for Superset
 
-Small FastAPI service that connects a GitHub issue to a Devin session, tracks the resulting pull request, and posts the outcome back to the issue.
+FastAPI control service that turns a labeled GitHub issue into a tracked Devin run, then brings the pull request and review status back to the issue thread.
 
-The concrete target is my Superset fork. Issue #2 tracks a Helm chart cleanup: removing the old `dockerize` init image from startup waits. Devin opened PR #4 for that change. This repo is the control layer around that flow.
+The concrete target is my Superset fork. Issue #2 tracks a Helm chart cleanup: removing the old `dockerize` init image from startup waits. Devin opened PR #4 for that change. This repo is the control layer around that flow: issue intake, scoped work order, session tracking, PR detection, status persistence, and reviewer-facing feedback.
+
+## Problem
+
+For scoped maintenance work, the expensive part is not detecting a label. It is preserving enough context for a coding agent to act, then giving a reviewer a compact record of what happened.
+
+This runner keeps that path explicit for one Superset workflow. GitHub remains the queue, Devin handles the repository change, and the service records enough state to answer whether the run is active, completed, blocked, or attached to a PR.
 
 ## Reference Run
 
@@ -13,7 +19,14 @@ The concrete target is my Superset fork. Issue #2 tracks a Helm chart cleanup: r
 | Devin PR #4 | https://github.com/RogueTex/superset/pull/4 |
 | Devin session | https://app.devin.ai/sessions/edd1bd6ac10b4e899ba2a886a1b5f744 |
 
-## What It Does
+## What This Demonstrates
+
+- A normal GitHub issue can become a bounded Devin work order.
+- Devin can inspect a real repository, make a branch, and open a reviewable PR.
+- The runner can track session state, PR state, and comments without merging code.
+- A lead or reviewer can inspect progress through `/dashboard`, `/status`, or the issue thread.
+
+## Workflow Loop
 
 1. Watches for a GitHub issue labeled `devin-remediate`.
 2. Fetches the issue and turns it into a focused Devin work order.
@@ -25,9 +38,9 @@ The concrete target is my Superset fork. Issue #2 tracks a Helm chart cleanup: r
 
 ## Why Devin
 
-The useful unit here is not "run a script when a label changes." The useful unit is handing a scoped repository problem to a coding agent that can inspect the repo, make a branch, open a PR, and return structured status.
+The useful unit here is not "run a script when a label changes." A script can run known commands; it cannot inspect an unfamiliar chart, reason about a small compatibility tradeoff, make a bounded patch, and open a reviewable PR.
 
-This service keeps the orchestration boring: GitHub owns the queue, Devin owns the code change, SQLite records state, and the issue thread gets the update a reviewer actually needs.
+Devin owns the code change. This service owns routing, state, and feedback. That split keeps the agent useful without hiding the run from the people who still need to review it.
 
 ## Architecture
 
@@ -203,6 +216,13 @@ make lint
 ```
 
 The tests cover prompt construction, SQLite persistence, import idempotency, trigger filtering, repo-bound PR URLs, status rendering, issue comment create/update, and a mocked labeled-issue loop through status and dashboard.
+
+## Next Extensions
+
+- Add reviewer routing based on issue labels or changed files.
+- Require a validation signal before posting a success comment.
+- Send status updates to Slack or another team channel.
+- Track trend metrics across multiple repositories and labels.
 
 ## Boundaries
 
